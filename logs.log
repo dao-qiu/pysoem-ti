@@ -1,0 +1,168 @@
+root@am62lxx-evm:~/ethercat# python3 read-motor-drive-status.py eth0
+Discovered 1 slave(s)
+Slave name: TI EtherCAT Toolkit CiA402 for AM243X.R5
+Vendor ID: 0x0000059D
+Product ID: 0x54490024
+Slave AL state before: 0x01
+Traceback (most recent call last):
+  File "/root/ethercat/read-motor-drive-status.py", line 26, in <module>
+    slave.state = pysoem.PRE_OP_STATE
+                  ^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'pysoem' has no attribute 'PRE_OP_STATE'. Did you mean: 'PREOP_STATE'?
+root@am62lxx-evm:~/ethercat# python3 read-motor-drive-status.py eth0
+Discovered 1 slave(s)
+Slave name: TI EtherCAT Toolkit CiA402 for AM243X.R5
+Vendor ID: 0x0000059D
+Product ID: 0x54490024
+Slave AL state before: 0x01
+Slave AL state after: 0x02 (state_check returned 0x02)
+AL status code: 0x0000
+Drive statusword: 0x0000
+root@am62lxx-evm:~/ethercat# python3 read-motor-drive-status.py eth0
+Discovered 1 slave(s)
+Slave name: TI EtherCAT Toolkit CiA402 for AM243X.R5
+Vendor ID: 0x0000059D
+Product ID: 0x54490024
+Slave AL state before: 0x01
+Slave AL state after PRE-OP request: 0x02, AL status code 0x0000
+Drive statusword (SDO): 0x0000 (Not ready to switch on)
+RxPDO (master -> slave): ['0x6040:00/16b', '0x6060:00/8b', '0x607A:00/32b', '0x60FF:00/32b', '0x6071:00/16b', '0x6840:00/16b', '0x6860:00/8b', '0x687A:00/32b', '0x68FF:00/32b', '0x6871:00/16b', '0x7040:0]
+TxPDO (slave -> master): ['0x6041:00/16b', '0x6061:00/8b', '0x6064:00/32b', '0x606C:00/32b', '0x6077:00/16b', '0x6841:00/16b', '0x6861:00/8b', '0x6864:00/32b', '0x686C:00/32b', '0x6877:00/16b', '0x7041:0]
+Process image size: 78 bytes (out 39, in 39)
+Slave AL state: 0x04 (SAFE-OP)
+Slave AL state: 0x08 (OP)
+Drive statusword (PDO): 0x1240 (Switch on disabled)
+Enable sequence skipped (pass --enable to run it)
+root@am62lxx-evm:~/ethercat# python3 read-motor-drive-status.py eth0 --enable --hold 3
+Discovered 1 slave(s)
+Slave name: TI EtherCAT Toolkit CiA402 for AM243X.R5
+Vendor ID: 0x0000059D
+Product ID: 0x54490024
+Slave AL state before: 0x01
+Slave AL state after PRE-OP request: 0x02, AL status code 0x0000
+Drive statusword (SDO): 0x0000 (Not ready to switch on)
+RxPDO (master -> slave): ['0x6040:00/16b', '0x6060:00/8b', '0x607A:00/32b', '0x60FF:00/32b', '0x6071:00/16b', '0x6840:00/16b', '0x6860:00/8b', '0x687A:00/32b', '0x68FF:00/32b', '0x6871:00/16b', '0x7040:0]
+TxPDO (slave -> master): ['0x6041:00/16b', '0x6061:00/8b', '0x6064:00/32b', '0x606C:00/32b', '0x6077:00/16b', '0x6841:00/16b', '0x6861:00/8b', '0x6864:00/32b', '0x686C:00/32b', '0x6877:00/16b', '0x7041:0]
+Process image size: 78 bytes (out 39, in 39)
+Slave AL state: 0x04 (SAFE-OP)
+Slave AL state: 0x08 (OP)
+Drive statusword (PDO): 0x1240 (Switch on disabled)
+Controlword 0x0006 -> statusword 0x1221 (Ready to switch on)
+Controlword 0x0007 -> statusword 0x1233 (Switched on)
+Controlword 0x000F -> statusword 0x1237 (Operation enabled)
+Final statusword: 0x1237 (Operation enabled)
+root@am62lxx-evm:~/ethercat# python3 read-motor-drive-status.py eth0 --enable --mode 9 --velocity 100 \
+>       --max-velocity 200 --accel 50 --motion-time 2
+Discovered 1 slave(s)
+Slave name: TI EtherCAT Toolkit CiA402 for AM243X.R5
+Vendor ID: 0x0000059D
+Product ID: 0x54490024
+Slave AL state before: 0x01
+Slave AL state after PRE-OP request: 0x02, AL status code 0x0000
+Drive statusword (SDO): 0x0000 (Not ready to switch on)
+RxPDO (master -> slave): ['0x6040:00/16b', '0x6060:00/8b', '0x607A:00/32b', '0x60FF:00/32b', '0x6071:00/16b', '0x6840:00/16b', '0x6860:00/8b', '0x687A:00/32b', '0x68FF:00/32b', '0x6871:00/16b', '0x7040:0]
+TxPDO (slave -> master): ['0x6041:00/16b', '0x6061:00/8b', '0x6064:00/32b', '0x606C:00/32b', '0x6077:00/16b', '0x6841:00/16b', '0x6861:00/8b', '0x6864:00/32b', '0x686C:00/32b', '0x6877:00/16b', '0x7041:0]
+Process image size: 78 bytes (out 39, in 39)
+Slave AL state: 0x04 (SAFE-OP)
+Slave AL state: 0x08 (OP)
+Drive (PDO): statusword 0x1240 (Switch on disabled), mode display 0 (No mode), position 0, velocity 0
+Mode of operation 9 (Cyclic synchronous velocity) active
+Drive (PDO): statusword 0x1240 (Switch on disabled), mode display 9 (Cyclic synchronous velocity), position 0, velocity 0
+Controlword 0x0006 -> statusword 0x1221 (Ready to switch on)
+Controlword 0x0007 -> statusword 0x1233 (Switched on)
+Controlword 0x000F -> statusword 0x1237 (Operation enabled)
+Ramping to velocity 100 at 50/s^2, hold 2.0s, limit 200
+  target 0: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position 0, velocity 0
+  target 12: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position 2761, velocity 12
+  target 25: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position 11254, velocity 25
+  target 37: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position 25483, velocity 37
+  target 50: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position 45457, velocity 50
+  target 62: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position 70923, velocity 62
+  target 75: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position 102360, velocity 75
+  target 87: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position 139526, velocity 87
+  target 100: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position 182419, velocity 100
+  target 100: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position 183293, velocity 100
+  target 100: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position 229602, velocity 100
+  target 100: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position 276785, velocity 100
+  target 100: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position 323968, velocity 100
+  target 100: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position 371588, velocity 100
+  target 100: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position 418771, velocity 100
+  target 100: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position 465517, velocity 100
+  target 100: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position 512700, velocity 100
+  target 100: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position 559883, velocity 100
+Ramping down to 0
+  target 100: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position 560320, velocity 100
+  target 88: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position 603396, velocity 88
+  target 75: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position 640763, velocity 75
+  target 63: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position 672100, velocity 63
+  target 50: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position 698016, velocity 50
+  target 38: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position 718178, velocity 38
+  target 25: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position 732612, velocity 25
+  target 13: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position 741254, velocity 13
+  target 0: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position 744233, velocity 0
+  statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position 744233, velocity 0
+  statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position 744233, velocity 0
+  statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position 744233, velocity 0
+Final: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position 744233, velocity 0
+Statusword after shutdown: 0x1240 (Switch on disabled)
+root@am62lxx-evm:~/ethercat# python3 read-motor-drive-status.py eth0 --enable --mode 9 --velocity 100 --direction ccw \
+>       --max-velocity 200 --accel 50 --motion-time 2
+usage: read-motor-drive-status.py [-h] [--enable] [--hold HOLD] [--mode MODE] [--velocity VELOCITY] [--max-velocity MAX_VELOCITY] [--accel ACCEL] [--motion-time MOTION_TIME] [interface]
+read-motor-drive-status.py: error: unrecognized arguments: --direction ccw
+root@am62lxx-evm:~/ethercat# python3 read-motor-drive-status.py eth0 --enable --mode 9 --velocity 100^C-direction ccw       --max-velocity 200 --accel 50 --motion-time 2
+root@am62lxx-evm:~/ethercat# python3 read-motor-drive-status.py eth0 --enable --mode 9 --velocity -100       --max-velocity 200 --accel 50 --motion-time 2                                                  
+Discovered 1 slave(s)
+Slave name: TI EtherCAT Toolkit CiA402 for AM243X.R5
+Vendor ID: 0x0000059D
+Product ID: 0x54490024
+Slave AL state before: 0x01
+Slave AL state after PRE-OP request: 0x02, AL status code 0x0000
+Drive statusword (SDO): 0x0000 (Not ready to switch on)
+RxPDO (master -> slave): ['0x6040:00/16b', '0x6060:00/8b', '0x607A:00/32b', '0x60FF:00/32b', '0x6071:00/16b', '0x6840:00/16b', '0x6860:00/8b', '0x687A:00/32b', '0x68FF:00/32b', '0x6871:00/16b', '0x7040:0]
+TxPDO (slave -> master): ['0x6041:00/16b', '0x6061:00/8b', '0x6064:00/32b', '0x606C:00/32b', '0x6077:00/16b', '0x6841:00/16b', '0x6861:00/8b', '0x6864:00/32b', '0x686C:00/32b', '0x6877:00/16b', '0x7041:0]
+Process image size: 78 bytes (out 39, in 39)
+Slave AL state: 0x04 (SAFE-OP)
+Slave AL state: 0x08 (OP)
+Drive (PDO): statusword 0x1240 (Switch on disabled), mode display 0 (No mode), position 0, velocity 0
+Mode of operation 9 (Cyclic synchronous velocity) active
+Drive (PDO): statusword 0x1240 (Switch on disabled), mode display 9 (Cyclic synchronous velocity), position 0, velocity 0
+Controlword 0x0006 -> statusword 0x1221 (Ready to switch on)
+Controlword 0x0007 -> statusword 0x1233 (Switched on)
+Controlword 0x000F -> statusword 0x1237 (Operation enabled)
+Ramping to velocity -100 at 50/s^2, hold 2.0s, limit 200
+  target 0: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position 0, velocity 0
+  target -12: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position -2756, velocity -12
+  target -25: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position -11267, velocity -25
+  target -37: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position -25500, velocity -37
+  target -50: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position -45452, velocity -50
+  target -62: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position -71154, velocity -62
+  target -75: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position -102299, velocity -75
+  target -87: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position -139452, velocity -87
+  target -100: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position -182760, velocity -100
+  target -100: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position -183633, velocity -100
+  target -100: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position -230379, velocity -100
+  target -100: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position -276689, velocity -100
+  target -100: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position -323435, velocity -100
+  target -100: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position -370618, velocity -100
+  target -100: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position -417801, velocity -100
+  target -100: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position -464547, velocity -100
+  target -100: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position -511293, velocity -100
+  target -100: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position -558476, velocity -100
+Ramping down to 0
+  target -100: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position -558913, velocity -100
+  target -88: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position -602003, velocity -88
+  target -75: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position -639378, velocity -75
+  target -63: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position -670999, velocity -63
+  target -50: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position -696880, velocity -50
+  target -38: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position -717055, velocity -38
+  target -25: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position -731638, velocity -25
+  target -13: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position -740262, velocity -13
+  target 0: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position -743233, velocity 0
+  statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position -743233, velocity 0
+  statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position -743233, velocity 0
+  statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position -743233, velocity 0
+Final: statusword 0x1237 (Operation enabled), mode display 9 (Cyclic synchronous velocity), position -743233, velocity 0
+Statusword after shutdown: 0x1240 (Switch on disabled)
+root@am62lxx-evm:~/ethercat# ls
+detect-ecat-slave.py  pysoem-1.1.13-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl  read-motor-drive-status.py
+root@am62lxx-evm:~/ethercat# 

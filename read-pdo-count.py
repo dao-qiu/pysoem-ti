@@ -11,12 +11,28 @@ def sdo_uint(slave, index, subindex):
 
 
 def list_pdos(slave, assign_index):
-    """Return {pdo_index: number_of_mapped_entries} for the PDOs assigned in assign_index."""
+    """Return {pdo_index: [(index, subindex, bitlen), ...]} for the PDOs assigned in assign_index."""
     pdos = {}
     for i in range(1, sdo_uint(slave, assign_index, 0) + 1):
         pdo_index = sdo_uint(slave, assign_index, i)
-        pdos[pdo_index] = sdo_uint(slave, pdo_index, 0)
+        entries = []
+        for j in range(1, sdo_uint(slave, pdo_index, 0) + 1):
+            value = sdo_uint(slave, pdo_index, j)
+            entries.append((value >> 16, (value >> 8) & 0xFF, value & 0xFF))
+        pdos[pdo_index] = entries
     return pdos
+
+
+def print_pdos(title, pdos):
+    print(f"  {title}: {len(pdos)}")
+    for pdo_index, entries in pdos.items():
+        total_bits = sum(bitlen for _, _, bitlen in entries)
+        print(f"    0x{pdo_index:04X}: {len(entries)} mapped objects, {total_bits} bits "
+              f"({(total_bits + 7) // 8} bytes)")
+        offset_bits = 0
+        for index, subindex, bitlen in entries:
+            print(f"      +{offset_bits // 8:3d}  0x{index:04X}:{subindex:02X}  {bitlen:2d} bit")
+            offset_bits += bitlen
 
 
 def main():
@@ -43,12 +59,8 @@ def main():
             rx = list_pdos(slave, RXPDO_ASSIGN)
             tx = list_pdos(slave, TXPDO_ASSIGN)
             print(f"Slave {number}: {slave.name}")
-            print(f"  RxPDOs assigned (0x1C12): {len(rx)}")
-            for pdo_index, entries in rx.items():
-                print(f"    0x{pdo_index:04X}: {entries} mapped objects")
-            print(f"  TxPDOs assigned (0x1C13): {len(tx)}")
-            for pdo_index, entries in tx.items():
-                print(f"    0x{pdo_index:04X}: {entries} mapped objects")
+            print_pdos("RxPDOs assigned (0x1C12)", rx)
+            print_pdos("TxPDOs assigned (0x1C13)", tx)
     finally:
         try:
             if master.slaves:

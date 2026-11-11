@@ -61,7 +61,7 @@ python3 read-motor-drive-status.py [interface] [--enable] [--hold SECONDS] [--mo
 | `--max-velocity LIMIT` | Positive limit. `abs(--velocity)` must not exceed it. The move aborts if the measured velocity exceeds 1.5 x this value. |
 | `--accel A` | Velocity ramp in units/s², used for both ramp up and ramp down. |
 | `--motion-time SECONDS` | Time to hold the target velocity between the ramps. |
-| `--velocity2 V2` | Target velocity written to `0x68FF` (second axis). Signed. Requires `--enable`, `--mode`, `--max-velocity2`, `--accel`, and `--motion-time`. Can be used with or without `--velocity`. |
+| `--velocity2 V2` | Target velocity written to `0x68FF` (second axis). Signed. Requires `--enable`, `--mode`, `--max-velocity2`, `--accel`, and `--motion-time`. Can be used with or without `--velocity`. Without `--velocity`, the first axis is not touched: its controlword stays `0x0000`. |
 | `--max-velocity2 LIMIT2` | Same meaning as `--max-velocity`, for the second axis. |
 
 `--mode`, `--accel`, and `--motion-time` are shared by both axes. Both axes ramp in the same loop
@@ -170,8 +170,9 @@ any drive limit.
    controlword `0x0000` until the statusword shows Switch on disabled, prints the final statusword,
    and sets the slave to INIT.
 
-The first axis (`0x6040`..`0x60FF`) is always controlled. The second axis (`0x6840`..`0x68FF`) is
-only controlled when `--velocity2` is given; otherwise its output bytes stay at zero. The `0x68xx`
+The first axis (`0x6040`..`0x60FF`) is controlled unless only `--velocity2` is given. The second
+axis (`0x6840`..`0x68FF`) is only controlled when `--velocity2` is given. An axis that is not
+controlled has its output bytes left at zero. The `0x68xx`
 mapping was seen in the recorded `logs.log` RxPDO/TxPDO lists; that the `+0x800` offset applies to
 every second-axis object has not been verified against the slave's documentation.
 

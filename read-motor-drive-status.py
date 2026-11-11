@@ -451,16 +451,19 @@ def main():
         print("Slave AL state: 0x04 (SAFE-OP)")
 
         drive = Drive(master, slave)
-        axis1 = drive.add_axis("Axis 1", rx_entries, tx_entries)
-        axes = [axis1]
-        # Axis 2 is only driven when requested; otherwise its output bytes stay zero
-        if args.velocity2 is not None:
-            axes.append(drive.add_axis("Axis 2", rx_entries, tx_entries, AXIS2_OFFSET))
+        # An axis is only driven when requested; otherwise its output bytes stay zero.
+        # Axis 1 is also the default when no velocity is given (status read, enable and hold).
         moves = {}
-        if args.velocity is not None:
-            moves[axis1] = (args.velocity, args.max_velocity)
+        axes = []
+        if args.velocity is not None or args.velocity2 is None:
+            axis1 = drive.add_axis("Axis 1", rx_entries, tx_entries)
+            axes.append(axis1)
+            if args.velocity is not None:
+                moves[axis1] = (args.velocity, args.max_velocity)
         if args.velocity2 is not None:
-            moves[axes[1]] = (args.velocity2, args.max_velocity2)
+            axis2 = drive.add_axis("Axis 2", rx_entries, tx_entries, AXIS2_OFFSET)
+            axes.append(axis2)
+            moves[axis2] = (args.velocity2, args.max_velocity2)
         for axis in moves:
             if axis.target_vel_off is None:
                 raise RuntimeError(f"{axis.name}: target velocity 0x{axis.target_vel_index:04X} "

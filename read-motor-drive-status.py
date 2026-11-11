@@ -304,15 +304,19 @@ class Drive:
                 return
 
     def hold_velocity(self, seconds, axes, limits, log_interval=0.25):
-        end = time.monotonic() + seconds
+        """Hold the target velocities for `seconds`, or until Ctrl+C if `seconds` is None."""
+        end = None if seconds is None else time.monotonic() + seconds
         next_log = time.monotonic()
-        while time.monotonic() < end:
-            self.cycle()
-            for axis in axes:
-                axis.check_safe(limits[axis])
-            if time.monotonic() >= next_log:
-                self.print_move_telemetry(axes)
-                next_log += log_interval
+        try:
+            while end is None or time.monotonic() < end:
+                self.cycle()
+                for axis in axes:
+                    axis.check_safe(limits[axis])
+                if time.monotonic() >= next_log:
+                    self.print_move_telemetry(axes)
+                    next_log += log_interval
+        except KeyboardInterrupt:
+            print("Interrupted, ramping down")
 
     def print_move_telemetry(self, axes):
         for axis in axes:
@@ -364,7 +368,11 @@ def parse_args():
     parser.add_argument("--accel", type=int, default=None,
                         help="velocity ramp in units/s^2 (required with --velocity)")
     parser.add_argument("--motion-time", type=float, default=None,
-                        help="seconds to hold the target velocity (required with --velocity)")
+                        help="seconds to hold the target velocity (required with --velocity "
+                             "unless --continuous is given)")
+    parser.add_argument("--continuous", action="store_true",
+                        help="hold the target velocity until Ctrl+C instead of --motion-time, then "
+                             "ramp down and disable. The safety checks stay active")
     parser.add_argument("--velocity2", type=int, default=None,
                         help="target velocity written to 0x68FF (second axis); requires --enable, "
                              "--mode, --max-velocity2, --accel and --motion-time. The mode, ramp "
@@ -372,6 +380,12 @@ def parse_args():
     parser.add_argument("--max-velocity2", type=int, default=None,
                         help="limit for the second axis, same meaning as --max-velocity")
     args = parser.parse_args()
+
+    if args.continuous:
+        if args.motion_time is not None:
+            parser.error("--continuous and --motion-time are mutually exclusive")
+        if args.velocity is None and args.velocity2 is None:
+            parser.error("--continuous requires --velocity or --velocity2")
 
     for suffix, velocity, max_velocity in (
             ("", args.velocity, args.max_velocity),
@@ -383,10 +397,11 @@ def parse_args():
         missing = [name for name, value in (
             ("--enable", args.enable or None), ("--mode", args.mode),
             (f"--max-velocity{suffix}", max_velocity), ("--accel", args.accel),
-            ("--motion-time", args.motion_time)) if value is None]
+            ("--motion-time", args.motion_time or args.continuous or None)) if value is None]
         if missing:
             parser.error(f"--velocity{suffix} also requires " + ", ".join(missing))
-        if max_velocity <= 0 or args.accel <= 0 or args.motion_time <= 0:
+        if (max_velocity <= 0 or args.accel <= 0
+                or (args.motion_time is not None and args.motion_time <= 0)):
             parser.error(f"--max-velocity{suffix}, --accel and --motion-time must be positive")
         if abs(velocity) > max_velocity:
             parser.error(f"|--velocity{suffix}| {abs(velocity)} exceeds --max-velocity{suffix} "
@@ -487,11 +502,13 @@ def main():
                 drive.print_telemetry("Final: ")
             else:
                 limits = {axis: limit for axis, (_, limit) in moves.items()}
+                hold_seconds = None if args.continuous else args.motion_time
+                hold_text = "until Ctrl+C" if args.continuous else f"{args.motion_time}s"
                 for axis, (velocity, limit) in moves.items():
                     print(f"{axis.name}: ramping to velocity {velocity} at {args.accel}/s^2, "
-                          f"hold {args.motion_time}s, limit {limit}")
+                          f"hold {hold_text}, limit {limit}")
                 drive.ramp_velocity({a: v for a, (v, _) in moves.items()}, args.accel, limits)
-                drive.hold_velocity(args.motion_time, list(moves), limits)
+                drive.hold_velocity(hold_seconds, list(moves), limits)
                 print("Ramping down to 0")
                 drive.ramp_velocity({a: 0 for a in moves}, args.accel, limits)
                 drive.run_cycles(0.5, log_interval=0.25)

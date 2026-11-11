@@ -48,7 +48,7 @@ scp read-motor-drive-status.py root@<board-ip>:~/ethercat/
 ```
 python3 read-motor-drive-status.py [interface] [--enable] [--hold SECONDS] [--mode N]
         [--velocity V --max-velocity LIMIT --accel A --motion-time SECONDS]
-        [--velocity2 V2 --max-velocity2 LIMIT2]
+        [--velocity2 V2 --max-velocity2 LIMIT2] [--continuous]
 ```
 
 | Argument | Description |
@@ -60,7 +60,8 @@ python3 read-motor-drive-status.py [interface] [--enable] [--hold SECONDS] [--mo
 | `--velocity V` | Target velocity written to `0x60FF`. Signed. Requires `--enable`, `--mode`, `--max-velocity`, `--accel`, and `--motion-time`. |
 | `--max-velocity LIMIT` | Positive limit. `abs(--velocity)` must not exceed it. The move aborts if the measured velocity exceeds 1.5 x this value. |
 | `--accel A` | Velocity ramp in units/s², used for both ramp up and ramp down. |
-| `--motion-time SECONDS` | Time to hold the target velocity between the ramps. |
+| `--motion-time SECONDS` | Time to hold the target velocity between the ramps. Required with `--velocity` / `--velocity2` unless `--continuous` is given. |
+| `--continuous` | Hold the target velocity until Ctrl+C instead of for `--motion-time`. Mutually exclusive with `--motion-time`; requires `--velocity` or `--velocity2`. On Ctrl+C the script ramps down at `--accel`, then runs the normal shutdown. The safety checks stay active while holding. |
 | `--velocity2 V2` | Target velocity written to `0x68FF` (second axis). Signed. Requires `--enable`, `--mode`, `--max-velocity2`, `--accel`, and `--motion-time`. Can be used with or without `--velocity`. Without `--velocity`, the first axis is not touched: its controlword stays `0x0000`. |
 | `--max-velocity2 LIMIT2` | Same meaning as `--max-velocity`, for the second axis. |
 
@@ -144,7 +145,18 @@ python3 read-motor-drive-status.py eth0 --enable --mode 9 --velocity 100 --max-v
 The second axis uses the objects at the first axis index + `0x800` (`0x6840`, `0x6860`, `0x68FF`,
 `0x6841`, `0x6861`, `0x6864`, `0x686C`). Neither form has been run on hardware.
 
-### 7. Conservative first test
+### 7. Continuous motion
+
+```
+python3 read-motor-drive-status.py eth0 --enable --mode 9 --velocity 100 \
+    --max-velocity 200 --accel 50 --continuous
+```
+
+Ramps to 100 and holds until Ctrl+C. This form has not been run on hardware. If the SSH session
+drops without delivering Ctrl+C, the script's behavior was not tested; the drive is not stopped
+by anything other than this script or the slave's own handling.
+
+### 8. Conservative first test
 
 ```
 python3 read-motor-drive-status.py eth0 --enable --mode 9 --velocity 10 \

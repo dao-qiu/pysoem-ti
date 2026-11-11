@@ -13,6 +13,9 @@ POSITION_ACTUAL = 0x6064
 VELOCITY_ACTUAL = 0x606C
 TARGET_VELOCITY = 0x60FF
 
+# The second axis objects are at the first axis index + 0x800 (0x6840 = 0x6040 + 0x800)
+AXIS2_OFFSET = 0x800
+
 CW_DISABLE_VOLTAGE = 0x0000
 CW_SHUTDOWN = 0x0006
 CW_SWITCH_ON = 0x0007
@@ -84,76 +87,72 @@ def decode_statusword(sw):
     return "Unknown"
 
 
-class Drive:
-    def __init__(self, master, slave, rx_entries, tx_entries):
-        self.master = master
-        self.slave = slave
-        self.cw_off = byte_offset(rx_entries, CONTROLWORD)
-        self.sw_off = byte_offset(tx_entries, STATUSWORD)
+class Axis:
+    """Object access and CiA 402 state handling for one axis of the drive."""
+
+    def __init__(self, drive, name, rx_entries, tx_entries, base=0):
+        self.drive = drive
+        self.name = name
+        self.cw_off = byte_offset(rx_entries, CONTROLWORD + base)
+        self.sw_off = byte_offset(tx_entries, STATUSWORD + base)
         if self.cw_off is None:
-            raise RuntimeError("Controlword 0x6040 is not in the RxPDO mapping")
+            raise RuntimeError(f"{name}: controlword 0x{CONTROLWORD + base:04X} is not in the "
+                               "RxPDO mapping")
         if self.sw_off is None:
-            raise RuntimeError("Statusword 0x6041 is not in the TxPDO mapping")
-        self.mode_off = byte_offset(rx_entries, MODE_OF_OPERATION)
-        self.target_vel_off = byte_offset(rx_entries, TARGET_VELOCITY)
-        self.mode_disp_off = byte_offset(tx_entries, MODE_OF_OPERATION_DISPLAY)
-        self.pos_off = byte_offset(tx_entries, POSITION_ACTUAL)
-        self.vel_off = byte_offset(tx_entries, VELOCITY_ACTUAL)
+            raise RuntimeError(f"{name}: statusword 0x{STATUSWORD + base:04X} is not in the "
+                               "TxPDO mapping")
+        self.mode_index = MODE_OF_OPERATION + base
+        self.mode_disp_index = MODE_OF_OPERATION_DISPLAY + base
+        self.target_vel_index = TARGET_VELOCITY + base
+        self.mode_off = byte_offset(rx_entries, self.mode_index)
+        self.target_vel_off = byte_offset(rx_entries, self.target_vel_index)
+        self.mode_disp_off = byte_offset(tx_entries, self.mode_disp_index)
+        self.pos_off = byte_offset(tx_entries, POSITION_ACTUAL + base)
+        self.vel_off = byte_offset(tx_entries, VELOCITY_ACTUAL + base)
         self.mode = None
         self.controlword = CW_DISABLE_VOLTAGE
         self.target_velocity = 0
         self.statusword = 0
 
-    def cycle(self):
-        out = bytearray(len(self.slave.output))
+    def pack_outputs(self, out):
         struct.pack_into("<H", out, self.cw_off, self.controlword)
         if self.mode is not None and self.mode_off is not None:
             struct.pack_into("<b", out, self.mode_off, self.mode)
         if self.target_vel_off is not None:
             struct.pack_into("<i", out, self.target_vel_off, int(self.target_velocity))
-        self.slave.output = bytes(out)
-        self.master.send_processdata()
-        wkc = self.master.receive_processdata(2000)
-        time.sleep(CYCLE_TIME_S)
-        if wkc != self.master.expected_wkc:
-            print(f"Warning: working counter {wkc}, expected {self.master.expected_wkc}")
-        self.statusword = struct.unpack_from("<H", self.slave.input, self.sw_off)[0]
+
+    def unpack_inputs(self, data):
+        self.statusword = struct.unpack_from("<H", data, self.sw_off)[0]
+
+    def cycle(self):
+        """Run one process data cycle and return this axis' statusword."""
+        self.drive.cycle()
         return self.statusword
 
-    def mode_display(self):
-        if self.mode_disp_off is None:
+    def _read(self, fmt, offset):
+        if offset is None:
             return None
-        return struct.unpack_from("<b", self.slave.input, self.mode_disp_off)[0]
+        return struct.unpack_from(fmt, self.drive.slave.input, offset)[0]
+
+    def mode_display(self):
+        return self._read("<b", self.mode_disp_off)
 
     def position(self):
-        if self.pos_off is None:
-            return None
-        return struct.unpack_from("<i", self.slave.input, self.pos_off)[0]
+        return self._read("<i", self.pos_off)
 
     def velocity(self):
-        if self.vel_off is None:
-            return None
-        return struct.unpack_from("<i", self.slave.input, self.vel_off)[0]
+        return self._read("<i", self.vel_off)
 
     def telemetry(self):
         mode = self.mode_display()
         mode_text = "n/a" if mode is None else f"{mode} ({MODE_NAMES.get(mode, 'unknown')})"
         pos = self.position()
         vel = self.velocity()
-        return (f"statusword 0x{self.statusword:04X} ({decode_statusword(self.statusword)}), "
+        return (f"{self.name}: statusword 0x{self.statusword:04X} "
+                f"({decode_statusword(self.statusword)}), "
                 f"mode display {mode_text}, "
                 f"position {'n/a' if pos is None else pos}, "
                 f"velocity {'n/a' if vel is None else vel}")
-
-    def run_cycles(self, seconds, log_interval=None):
-        end = time.monotonic() + seconds
-        next_log = time.monotonic()
-        while time.monotonic() < end:
-            self.cycle()
-            if log_interval is not None and time.monotonic() >= next_log:
-                print("  " + self.telemetry())
-                next_log += log_interval
-        return self.statusword
 
     def command(self, controlword, mask, expected, timeout=2.0):
         """Send controlword until (statusword & mask) == expected."""
@@ -163,94 +162,161 @@ class Drive:
         while (sw & mask) != expected:
             if time.monotonic() > end:
                 raise RuntimeError(
-                    f"Timeout with controlword 0x{controlword:04X}: statusword "
+                    f"{self.name}: timeout with controlword 0x{controlword:04X}: statusword "
                     f"0x{sw:04X} ({decode_statusword(sw)}), expected 0x{expected:04X}"
                 )
             sw = self.cycle()
-        print(f"Controlword 0x{controlword:04X} -> statusword 0x{sw:04X} ({decode_statusword(sw)})")
+        print(f"{self.name}: controlword 0x{controlword:04X} -> statusword 0x{sw:04X} "
+              f"({decode_statusword(sw)})")
         return sw
 
     def select_mode(self, mode, timeout=2.0):
-        """Write Modes of operation 0x6060 and wait until 0x6061 shows it."""
+        """Write Modes of operation and wait until the display object shows it."""
         if self.mode_off is None:
-            raise RuntimeError("Modes of operation 0x6060 is not in the RxPDO mapping")
+            raise RuntimeError(f"{self.name}: modes of operation 0x{self.mode_index:04X} is not "
+                               "in the RxPDO mapping")
         if self.mode_disp_off is None:
-            raise RuntimeError("Modes of operation display 0x6061 is not in the TxPDO mapping")
+            raise RuntimeError(f"{self.name}: modes of operation display "
+                               f"0x{self.mode_disp_index:04X} is not in the TxPDO mapping")
         self.mode = mode
         end = time.monotonic() + timeout
         while self.cycle() is not None and self.mode_display() != mode:
             if time.monotonic() > end:
                 raise RuntimeError(
-                    f"Mode {mode} not accepted: mode display is {self.mode_display()}"
+                    f"{self.name}: mode {mode} not accepted: mode display is "
+                    f"{self.mode_display()}"
                 )
-        print(f"Mode of operation {mode} ({MODE_NAMES.get(mode, 'unknown')}) active")
+        print(f"{self.name}: mode of operation {mode} ({MODE_NAMES.get(mode, 'unknown')}) active")
 
     def enable(self):
         sw = self.cycle()
         if sw & 0x4F in (0x08, 0x0F):
-            print("Drive in fault, sending fault reset")
+            print(f"{self.name}: drive in fault, sending fault reset")
             self.controlword = CW_FAULT_RESET
-            self.run_cycles(0.1)
+            self.drive.run_cycles(0.1)
             self.command(CW_DISABLE_VOLTAGE, 0x4F, 0x40)
         self.command(CW_SHUTDOWN, 0x6F, 0x21)
         self.command(CW_SWITCH_ON, 0x6F, 0x23)
         self.command(CW_ENABLE_OPERATION, 0x6F, 0x27)
 
-    def disable(self):
-        """Zero the target velocity, then step the drive back to Switch on disabled."""
-        self.target_velocity = 0
-        self.run_cycles(0.2)
-        self.controlword = CW_SHUTDOWN
-        self.run_cycles(0.2)
-        self.controlword = CW_DISABLE_VOLTAGE
-        end = time.monotonic() + 2.0
-        while self.cycle() & 0x4F != 0x40 and time.monotonic() < end:
-            pass
-        print(f"Statusword after shutdown: 0x{self.statusword:04X} "
-              f"({decode_statusword(self.statusword)})")
-
     def check_safe(self, max_velocity):
         """Raise if the drive faulted or the measured velocity is beyond the limit."""
         if self.statusword & 0x08:
-            raise RuntimeError(f"Drive fault, statusword 0x{self.statusword:04X}")
+            raise RuntimeError(f"{self.name}: drive fault, statusword 0x{self.statusword:04X}")
         if self.statusword & 0x6F != 0x27:
             raise RuntimeError(
-                f"Drive left Operation enabled, statusword 0x{self.statusword:04X}"
+                f"{self.name}: drive left Operation enabled, statusword 0x{self.statusword:04X}"
             )
         vel = self.velocity()
         if vel is not None and abs(vel) > max_velocity * ACTUAL_VELOCITY_ABORT_FACTOR:
             raise RuntimeError(
-                f"Measured velocity {vel} exceeds {ACTUAL_VELOCITY_ABORT_FACTOR} x "
+                f"{self.name}: measured velocity {vel} exceeds {ACTUAL_VELOCITY_ABORT_FACTOR} x "
                 f"max velocity {max_velocity}"
             )
 
-    def ramp_velocity(self, target, accel, max_velocity, log_interval=0.25):
-        """Move the target velocity to `target` at `accel` units/s^2, with safety checks."""
-        start = self.target_velocity
-        duration = abs(target - start) / accel
-        t0 = time.monotonic()
-        next_log = t0
-        while True:
-            elapsed = time.monotonic() - t0
-            fraction = 1.0 if duration == 0 else min(elapsed / duration, 1.0)
-            self.target_velocity = round(start + (target - start) * fraction)
-            self.cycle()
-            self.check_safe(max_velocity)
-            if time.monotonic() >= next_log:
-                print(f"  target {self.target_velocity}: " + self.telemetry())
-                next_log += log_interval
-            if fraction >= 1.0:
-                return
 
-    def hold_velocity(self, seconds, max_velocity, log_interval=0.25):
+class Drive:
+    """Process data exchange for the slave. All axes share one process image."""
+
+    def __init__(self, master, slave):
+        self.master = master
+        self.slave = slave
+        self.axes = []
+
+    def add_axis(self, name, rx_entries, tx_entries, base=0):
+        axis = Axis(self, name, rx_entries, tx_entries, base)
+        self.axes.append(axis)
+        return axis
+
+    def cycle(self):
+        out = bytearray(len(self.slave.output))
+        for axis in self.axes:
+            axis.pack_outputs(out)
+        self.slave.output = bytes(out)
+        self.master.send_processdata()
+        wkc = self.master.receive_processdata(2000)
+        time.sleep(CYCLE_TIME_S)
+        if wkc != self.master.expected_wkc:
+            print(f"Warning: working counter {wkc}, expected {self.master.expected_wkc}")
+        for axis in self.axes:
+            axis.unpack_inputs(self.slave.input)
+
+    def telemetry(self):
+        return " | ".join(axis.telemetry() for axis in self.axes)
+
+    def print_telemetry(self, prefix=""):
+        for axis in self.axes:
+            print(f"{prefix}{axis.telemetry()}")
+
+    def run_cycles(self, seconds, log_interval=None):
         end = time.monotonic() + seconds
         next_log = time.monotonic()
         while time.monotonic() < end:
             self.cycle()
-            self.check_safe(max_velocity)
-            if time.monotonic() >= next_log:
-                print(f"  target {self.target_velocity}: " + self.telemetry())
+            if log_interval is not None and time.monotonic() >= next_log:
+                self.print_telemetry("  ")
                 next_log += log_interval
+
+    def disable(self):
+        """Zero all target velocities, then step every axis back to Switch on disabled."""
+        for axis in self.axes:
+            axis.target_velocity = 0
+        self.run_cycles(0.2)
+        for axis in self.axes:
+            axis.controlword = CW_SHUTDOWN
+        self.run_cycles(0.2)
+        for axis in self.axes:
+            axis.controlword = CW_DISABLE_VOLTAGE
+        end = time.monotonic() + 2.0
+        while time.monotonic() < end:
+            self.cycle()
+            if all(axis.statusword & 0x4F == 0x40 for axis in self.axes):
+                break
+        for axis in self.axes:
+            print(f"{axis.name}: statusword after shutdown: 0x{axis.statusword:04X} "
+                  f"({decode_statusword(axis.statusword)})")
+
+    def ramp_velocity(self, targets, accel, limits, log_interval=0.25):
+        """Move each axis target velocity to its value in `targets` at `accel` units/s^2.
+
+        `targets` and `limits` map Axis -> target velocity / max velocity. Safety checks run
+        on every axis in `targets` each cycle.
+        """
+        starts = {axis: axis.target_velocity for axis in targets}
+        durations = {axis: abs(targets[axis] - starts[axis]) / accel for axis in targets}
+        total = max(durations.values())
+        t0 = time.monotonic()
+        next_log = t0
+        while True:
+            elapsed = time.monotonic() - t0
+            for axis in targets:
+                d = durations[axis]
+                fraction = 1.0 if d == 0 else min(elapsed / d, 1.0)
+                axis.target_velocity = round(
+                    starts[axis] + (targets[axis] - starts[axis]) * fraction)
+            self.cycle()
+            for axis in targets:
+                axis.check_safe(limits[axis])
+            if time.monotonic() >= next_log:
+                self.print_move_telemetry(targets)
+                next_log += log_interval
+            if elapsed >= total:
+                return
+
+    def hold_velocity(self, seconds, axes, limits, log_interval=0.25):
+        end = time.monotonic() + seconds
+        next_log = time.monotonic()
+        while time.monotonic() < end:
+            self.cycle()
+            for axis in axes:
+                axis.check_safe(limits[axis])
+            if time.monotonic() >= next_log:
+                self.print_move_telemetry(axes)
+                next_log += log_interval
+
+    def print_move_telemetry(self, axes):
+        for axis in axes:
+            print(f"  target {axis.target_velocity}: " + axis.telemetry())
 
 
 def goto_state(master, slave, state, name, timeout_us=2_000_000):
@@ -280,7 +346,7 @@ def go_operational(master, slave, drive):
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Read CiA 402 drive status over EtherCAT, optionally enable the drive and "
-                    "run a velocity move (axis 1: 0x6040..0x60FF only). "
+                    "run a velocity move (axis 1: 0x6040..0x60FF, axis 2: 0x6840..0x68FF). "
                     "Velocity units are those of the drive's object 0x60FF/0x606C.")
     parser.add_argument("interface", nargs="?", default="eth0")
     parser.add_argument("--enable", action="store_true",
@@ -299,20 +365,32 @@ def parse_args():
                         help="velocity ramp in units/s^2 (required with --velocity)")
     parser.add_argument("--motion-time", type=float, default=None,
                         help="seconds to hold the target velocity (required with --velocity)")
+    parser.add_argument("--velocity2", type=int, default=None,
+                        help="target velocity written to 0x68FF (second axis); requires --enable, "
+                             "--mode, --max-velocity2, --accel and --motion-time. The mode, ramp "
+                             "and hold time are shared with the first axis")
+    parser.add_argument("--max-velocity2", type=int, default=None,
+                        help="limit for the second axis, same meaning as --max-velocity")
     args = parser.parse_args()
 
-    if args.velocity is not None:
+    for suffix, velocity, max_velocity in (
+            ("", args.velocity, args.max_velocity),
+            ("2", args.velocity2, args.max_velocity2)):
+        if velocity is None:
+            if max_velocity is not None:
+                parser.error(f"--max-velocity{suffix} requires --velocity{suffix}")
+            continue
         missing = [name for name, value in (
             ("--enable", args.enable or None), ("--mode", args.mode),
-            ("--max-velocity", args.max_velocity), ("--accel", args.accel),
+            (f"--max-velocity{suffix}", max_velocity), ("--accel", args.accel),
             ("--motion-time", args.motion_time)) if value is None]
         if missing:
-            parser.error("--velocity also requires " + ", ".join(missing))
-        if args.max_velocity <= 0 or args.accel <= 0 or args.motion_time <= 0:
-            parser.error("--max-velocity, --accel and --motion-time must be positive")
-        if abs(args.velocity) > args.max_velocity:
-            parser.error(f"|--velocity| {abs(args.velocity)} exceeds --max-velocity "
-                         f"{args.max_velocity}")
+            parser.error(f"--velocity{suffix} also requires " + ", ".join(missing))
+        if max_velocity <= 0 or args.accel <= 0 or args.motion_time <= 0:
+            parser.error(f"--max-velocity{suffix}, --accel and --motion-time must be positive")
+        if abs(velocity) > max_velocity:
+            parser.error(f"|--velocity{suffix}| {abs(velocity)} exceeds --max-velocity{suffix} "
+                         f"{max_velocity}")
     return args
 
 
@@ -372,33 +450,49 @@ def main():
             )
         print("Slave AL state: 0x04 (SAFE-OP)")
 
-        drive = Drive(master, slave, rx_entries, tx_entries)
-        if args.velocity is not None and drive.target_vel_off is None:
-            raise RuntimeError("Target velocity 0x60FF is not in the RxPDO mapping")
+        drive = Drive(master, slave)
+        axis1 = drive.add_axis("Axis 1", rx_entries, tx_entries)
+        axes = [axis1]
+        # Axis 2 is only driven when requested; otherwise its output bytes stay zero
+        if args.velocity2 is not None:
+            axes.append(drive.add_axis("Axis 2", rx_entries, tx_entries, AXIS2_OFFSET))
+        moves = {}
+        if args.velocity is not None:
+            moves[axis1] = (args.velocity, args.max_velocity)
+        if args.velocity2 is not None:
+            moves[axes[1]] = (args.velocity2, args.max_velocity2)
+        for axis in moves:
+            if axis.target_vel_off is None:
+                raise RuntimeError(f"{axis.name}: target velocity 0x{axis.target_vel_index:04X} "
+                                   "is not in the RxPDO mapping")
         go_operational(master, slave, drive)
 
         drive.run_cycles(0.5)
-        print("Drive (PDO): " + drive.telemetry())
+        drive.print_telemetry("Drive (PDO): ")
 
         if args.mode is not None:
-            drive.select_mode(args.mode)
+            for axis in axes:
+                axis.select_mode(args.mode)
             drive.run_cycles(0.2)
-            print("Drive (PDO): " + drive.telemetry())
+            drive.print_telemetry("Drive (PDO): ")
 
         if args.enable:
-            drive.enable()
-            if args.velocity is None:
+            for axis in axes:
+                axis.enable()
+            if not moves:
                 drive.run_cycles(args.hold, log_interval=0.5)
-                print("Final: " + drive.telemetry())
+                drive.print_telemetry("Final: ")
             else:
-                print(f"Ramping to velocity {args.velocity} at {args.accel}/s^2, "
-                      f"hold {args.motion_time}s, limit {args.max_velocity}")
-                drive.ramp_velocity(args.velocity, args.accel, args.max_velocity)
-                drive.hold_velocity(args.motion_time, args.max_velocity)
+                limits = {axis: limit for axis, (_, limit) in moves.items()}
+                for axis, (velocity, limit) in moves.items():
+                    print(f"{axis.name}: ramping to velocity {velocity} at {args.accel}/s^2, "
+                          f"hold {args.motion_time}s, limit {limit}")
+                drive.ramp_velocity({a: v for a, (v, _) in moves.items()}, args.accel, limits)
+                drive.hold_velocity(args.motion_time, list(moves), limits)
                 print("Ramping down to 0")
-                drive.ramp_velocity(0, args.accel, args.max_velocity)
+                drive.ramp_velocity({a: 0 for a in moves}, args.accel, limits)
                 drive.run_cycles(0.5, log_interval=0.25)
-                print("Final: " + drive.telemetry())
+                drive.print_telemetry("Final: ")
         else:
             print("Enable sequence skipped (pass --enable to run it)")
     finally:

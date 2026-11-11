@@ -48,6 +48,7 @@ scp read-motor-drive-status.py root@<board-ip>:~/ethercat/
 ```
 python3 read-motor-drive-status.py [interface] [--enable] [--hold SECONDS] [--mode N]
         [--velocity V --max-velocity LIMIT --accel A --motion-time SECONDS]
+        [--velocity2 V2 --max-velocity2 LIMIT2]
 ```
 
 | Argument | Description |
@@ -60,8 +61,13 @@ python3 read-motor-drive-status.py [interface] [--enable] [--hold SECONDS] [--mo
 | `--max-velocity LIMIT` | Positive limit. `abs(--velocity)` must not exceed it. The move aborts if the measured velocity exceeds 1.5 x this value. |
 | `--accel A` | Velocity ramp in units/s², used for both ramp up and ramp down. |
 | `--motion-time SECONDS` | Time to hold the target velocity between the ramps. |
+| `--velocity2 V2` | Target velocity written to `0x68FF` (second axis). Signed. Requires `--enable`, `--mode`, `--max-velocity2`, `--accel`, and `--motion-time`. Can be used with or without `--velocity`. |
+| `--max-velocity2 LIMIT2` | Same meaning as `--max-velocity`, for the second axis. |
 
-The script rejects `--velocity` at argument parsing if any required companion argument is missing,
+`--mode`, `--accel`, and `--motion-time` are shared by both axes. Both axes ramp in the same loop
+and hold for the same time. Each axis has its own limit and its own safety checks.
+
+The script rejects `--velocity` / `--velocity2` at argument parsing if any required companion argument is missing,
 if a limit, ramp, or time is not positive, or if `abs(--velocity)` exceeds `--max-velocity`.
 
 ## Example configurations
@@ -125,7 +131,20 @@ python3 read-motor-drive-status.py eth0 --enable --mode 9 --velocity -100 \
 A negative `--velocity` writes a negative `0x60FF`. This form has not been run on the hardware, and
 which shaft direction a negative value produces has not been established.
 
-### 6. Conservative first test
+### 6. Velocity move on the second axis only, or on both
+
+```
+python3 read-motor-drive-status.py eth0 --enable --mode 9 --velocity2 100 \
+    --max-velocity2 200 --accel 50 --motion-time 2
+
+python3 read-motor-drive-status.py eth0 --enable --mode 9 --velocity 100 --max-velocity 200 \
+    --velocity2 -100 --max-velocity2 200 --accel 50 --motion-time 2
+```
+
+The second axis uses the objects at the first axis index + `0x800` (`0x6840`, `0x6860`, `0x68FF`,
+`0x6841`, `0x6861`, `0x6864`, `0x686C`). Neither form has been run on hardware.
+
+### 7. Conservative first test
 
 ```
 python3 read-motor-drive-status.py eth0 --enable --mode 9 --velocity 10 \
@@ -151,8 +170,10 @@ any drive limit.
    controlword `0x0000` until the statusword shows Switch on disabled, prints the final statusword,
    and sets the slave to INIT.
 
-Only the first axis is controlled (`0x6040`..`0x60FF`). The tested slave also maps a second set of
-objects at `0x68xx`. Its output bytes stay at zero.
+The first axis (`0x6040`..`0x60FF`) is always controlled. The second axis (`0x6840`..`0x68FF`) is
+only controlled when `--velocity2` is given; otherwise its output bytes stay at zero. The `0x68xx`
+mapping was seen in the recorded `logs.log` RxPDO/TxPDO lists; that the `+0x800` offset applies to
+every second-axis object has not been verified against the slave's documentation.
 
 ### Abort conditions during a velocity move
 

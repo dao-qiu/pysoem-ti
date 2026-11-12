@@ -17,6 +17,11 @@ import pysoem
 SNAPSHOT_EVERY_CYCLES = 25
 # Longest time step used when ramping, so a slow cycle never produces a big jump
 MAX_RAMP_DT_S = 0.05
+# After a stop request, keep Enable Operation while sending target velocity 0 for this long before
+# dropping the controlword. The slave only passes 0x60FF on to the motor core while Enable Operation
+# is set (ESL_cia402Demo.c), so dropping the controlword in the same cycle can leave the old target
+# in place. Drive.disable() in read-motor-drive-status.py holds 0.2 s the same way.
+STOP_HOLD_S = 0.2
 
 
 def load_drive_module():
@@ -62,6 +67,7 @@ class Controller:
         self._active = [False for _ in axes]
         self._target = [0.0 for _ in axes]
         self._last_step = time.monotonic()
+        self._hold_until = 0.0
         self._cycles = 0
 
     # Called from web threads
@@ -154,6 +160,7 @@ class Controller:
             wanted = [(cmd.enabled, cmd.direction * cmd.speed) for cmd in self.commands]
             estop, self.estop = self.estop, False
         if estop:
+            self._hold_until = now + STOP_HOLD_S
             for i, axis in enumerate(self.axes):
                 self._target[i] = 0.0
                 axis.target_velocity = 0
@@ -168,7 +175,8 @@ class Controller:
                     continue
                 self._active[i] = True
             self._ramp(i, goal if enabled else 0, dt)
-            if not enabled and self._active[i] and self._target[i] == 0:
+            if (not enabled and self._active[i] and self._target[i] == 0
+                    and now >= self._hold_until):
                 axis.controlword = self.rds.CW_DISABLE_VOLTAGE
                 self._active[i] = False
 

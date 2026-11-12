@@ -203,6 +203,101 @@ These abort paths have not been triggered on the hardware.
 `Warning: working counter N, expected M` means a process data frame was not fully processed by the
 slave. It was not observed in the recorded runs.
 
+## Web UI (motor-web.py)
+
+`motor-web.py` runs the same EtherCAT control as `read-motor-drive-status.py` and serves a web page
+with buttons to turn each motor on or off, change the velocity, and reverse the direction. It
+imports `Axis` and `Drive` from `read-motor-drive-status.py`, so keep both files in the same
+directory. It uses only the Python standard library besides `pysoem`.
+
+This was tested only against a simulated drive on a PC. It has not been run against the real slave.
+Run the first tests with the motor unloaded, and keep a hardware emergency stop within reach (see
+[Safety](#safety)).
+
+### Network setup
+
+- EtherCAT uses raw frames on `eth0`. Serve the page on a different interface. In the setup used
+  while developing it, the board's `eth1` (`172.168.1.82`) is connected to the PC (`172.168.1.1`).
+- The PC may have an HTTP proxy configured. If the browser shows a proxy error, add the board's
+  address to the browser's "No proxy for" list (Firefox: Settings, General, Network Settings). This
+  fixed the connection to a test server in that setup. See `notes.md`.
+
+### Start
+
+On the board, as root:
+
+```
+python3 motor-web.py eth0 --bind 172.168.1.82 --max-velocity 20 --step 5 --accel 5
+```
+
+The values are placeholders for a conservative first test and are not derived from any drive limit.
+After the slave reaches OP, the script prints:
+
+```
+Serving on http://172.168.1.82:8080/?token=<token>
+```
+
+Open that full URL in the browser. The `<token>` is random and changes on each start. Without the
+token, every request is rejected (the page shows `{"error": "bad token"}`). To use a fixed token, add
+`--token mysecret` and open `http://172.168.1.82:8080/?token=mysecret`. The token is sent unencrypted
+over HTTP.
+
+Stop the script with Ctrl+C. It ramps the motors down and disables them before leaving OP.
+
+### Options
+
+```
+python3 motor-web.py [interface] --bind ADDRESS --max-velocity LIMIT --step STEP --accel A
+        [--port PORT] [--token TOKEN] [--heartbeat SECONDS] [--mode N] [--axes LIST]
+```
+
+| Argument | Description |
+|---|---|
+| `interface` | Network interface connected to the EtherCAT slave. Default `eth0`. |
+| `--bind ADDRESS` | Required. IP address to serve the page on, for example the address of `eth1`. There is no default so that the page is not served on the EtherCAT port by accident. |
+| `--port PORT` | TCP port. Default `8080`. |
+| `--token TOKEN` | Secret every request must carry. A random one is generated and printed if not given. |
+| `--max-velocity LIMIT` | Required. Positive limit enforced by the server. The set speed is clamped to `0..LIMIT`. The script also aborts an axis if its measured velocity exceeds 1.5 x this value. |
+| `--step STEP` | Required. Velocity change for each Faster / Slower press. Must not exceed `--max-velocity`. |
+| `--accel A` | Required. Velocity ramp in units/s², used when turning on, changing speed, reversing, and turning off. |
+| `--heartbeat SECONDS` | If no request reaches the server for this long, the motors ramp down and are disabled. Default `3`. |
+| `--mode N` | Modes of operation written to every controlled axis. Default `9` (cyclic synchronous velocity). |
+| `--axes LIST` | Axes to control: `1`, `2`, or `1,2`. Default `1,2`. Axis 2 uses the objects at the axis 1 index + `0x800`. |
+
+Velocity units are those of the drive's objects `0x60FF` / `0x606C` (see [Open points](#open-points)).
+
+### Buttons
+
+For each axis:
+
+| Button | Action |
+|---|---|
+| Turn ON / Turn OFF | ON runs the CiA 402 enable sequence and then ramps to the set speed. OFF ramps to 0 at `--accel`, then disables the axis. |
+| Faster / Slower | Changes the set speed by `--step`. The speed stays between 0 and `--max-velocity`. |
+| Reverse | Flips the direction. The velocity ramps through 0 at `--accel`. It is never a step from +v to -v. |
+
+The set speed is shown as a signed value (the sign is the direction). The set speed starts at 0, so
+press Faster after Turn ON to move the motor.
+
+`STOP ALL` sets every target velocity to 0 on the next cycle, without a ramp, and then disables all
+axes.
+
+### Safety behavior
+
+- Speed limits are enforced on the server. The page cannot exceed `--max-velocity`.
+- If the page stops sending requests (closed tab, lost link), the motors ramp down and are disabled
+  after `--heartbeat` seconds. The page polls about every 300 ms while it is open.
+- Per axis, a fault bit, leaving Operation enabled, or a measured velocity above 1.5 x
+  `--max-velocity` stops that axis, turns all axes off, and shows the error on the page. Turning the
+  axis on again clears the error.
+- If the control loop itself stops (for example an exception), the motors are disabled and the page
+  shows the error.
+- Plain HTTP with a token is not strong protection. Anyone on the same network who gets the token can
+  drive the motors. Bind only to the interface you need.
+- The velocity and position shown on the page are the values the slave reports. They are the commanded
+  values, not measurements (see `notes.md`).
+- What the drive does if the script is killed or frames stop was not established.
+
 ## Troubleshooting
 
 | Symptom | Likely cause |

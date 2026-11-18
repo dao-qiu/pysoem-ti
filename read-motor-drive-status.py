@@ -26,7 +26,7 @@ CW_FAULT_RESET = 0x0080
 
 CYCLE_TIME_S = 0.002
 
-# Keyboard control of axis 1 in --continuous mode: up/down change the speed by this much
+# Keyboard control of one axis in --continuous mode: up/down change the speed by this much
 KEY_VELOCITY_STEP = 5
 # Which sign of 0x60FF is clockwise has not been established on the tested slave. This assumes
 # positive = CW. Swap the two values if the shaft turns the other way.
@@ -495,6 +495,10 @@ def parse_args():
                              "and hold time are shared with the first axis")
     parser.add_argument("--max-velocity2", type=int, default=None,
                         help="limit for the second axis, same meaning as --max-velocity")
+    parser.add_argument("--key-axis", type=int, choices=(1, 2), default=None,
+                        help="with --continuous, the axis the arrow keys and space bar control "
+                             "(one axis at a time; the other axis keeps its velocity). Default: "
+                             "axis 1 if --velocity is given, otherwise axis 2")
     args = parser.parse_args()
 
     if args.continuous:
@@ -502,6 +506,14 @@ def parse_args():
             parser.error("--continuous and --motion-time are mutually exclusive")
         if args.velocity is None and args.velocity2 is None:
             parser.error("--continuous requires --velocity or --velocity2")
+    if args.key_axis is not None:
+        if not args.continuous:
+            parser.error("--key-axis requires --continuous")
+        if (args.velocity if args.key_axis == 1 else args.velocity2) is None:
+            parser.error(f"--key-axis {args.key_axis} requires --velocity"
+                         f"{'' if args.key_axis == 1 else '2'} (that axis must be moving)")
+    if args.continuous and args.key_axis is None:
+        args.key_axis = 1 if args.velocity is not None else 2
 
     for suffix, velocity, max_velocity in (
             ("", args.velocity, args.max_velocity),
@@ -586,7 +598,7 @@ def main():
         # Axis 1 is also the default when no velocity is given (status read, enable and hold).
         moves = {}
         axes = []
-        axis1 = None
+        axis1 = axis2 = None
         if args.velocity is not None or args.velocity2 is None:
             axis1 = drive.add_axis("Axis 1", rx_entries, tx_entries)
             axes.append(axis1)
@@ -627,19 +639,18 @@ def main():
                 drive.ramp_velocity({a: v for a, (v, _) in moves.items()}, args.accel, limits)
                 keyboard = None
                 if args.continuous:
-                    if axis1 is None or axis1 not in moves:
-                        print("Arrow key control is for axis 1 only; axis 1 is not moving, "
-                              "keys disabled")
-                    elif not sys.stdin.isatty():
+                    if not sys.stdin.isatty():
                         print("Arrow key control needs a terminal on stdin, keys disabled")
                     else:
-                        keyboard = KeyboardVelocity(axis1, args.velocity, args.max_velocity,
-                                                    args.accel)
+                        key_axis = axis1 if args.key_axis == 1 else axis2
+                        velocity, max_velocity = moves[key_axis]
+                        keyboard = KeyboardVelocity(key_axis, velocity, max_velocity, args.accel)
                 if keyboard is None:
                     drive.hold_velocity(hold_seconds, list(moves), limits)
                 else:
-                    print(f"Keys (axis 1 only): Up/Down speed +/-{KEY_VELOCITY_STEP}, "
-                          "Left = CCW, Right = CW, Space = stop axis 1, Ctrl+C to exit")
+                    print(f"Keys ({keyboard.axis.name} only): Up/Down speed +/-{KEY_VELOCITY_STEP}, "
+                          f"Left = CCW, Right = CW, Space = stop {keyboard.axis.name}, "
+                          "Ctrl+C to exit")
                     with keyboard:
                         drive.hold_velocity(hold_seconds, list(moves), limits, keyboard=keyboard)
                 print("Ramping down to 0")

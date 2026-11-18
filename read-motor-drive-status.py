@@ -1,4 +1,6 @@
 import argparse
+import os
+import select
 import struct
 import sys
 import time
@@ -23,6 +25,13 @@ CW_ENABLE_OPERATION = 0x000F
 CW_FAULT_RESET = 0x0080
 
 CYCLE_TIME_S = 0.002
+
+# Keyboard control of axis 1 in --continuous mode: up/down change the speed by this much
+KEY_VELOCITY_STEP = 5
+# Which sign of 0x60FF is clockwise has not been established on the tested slave. This assumes
+# positive = CW. Swap the two values if the shaft turns the other way.
+DIRECTION_CW = 1
+DIRECTION_CCW = -1
 
 # Abort motion if the measured velocity exceeds this multiple of --max-velocity
 ACTUAL_VELOCITY_ABORT_FACTOR = 1.5
@@ -85,6 +94,103 @@ def decode_statusword(sw):
     if sw & 0x4F == 0x00:
         return "Not ready to switch on"
     return "Unknown"
+
+
+KEY_SEQUENCES = {
+    b"\x1b[A": "up", b"\x1b[B": "down", b"\x1b[C": "right", b"\x1b[D": "left",
+    b"\x1bOA": "up", b"\x1bOB": "down", b"\x1bOC": "right", b"\x1bOD": "left",
+    b" ": "stop",
+}
+
+
+class KeyboardVelocity:
+    """Change the velocity of one axis from the arrow keys while it is held.
+
+    Up/down change the speed by `step` (limited to 0..max_velocity). Left sets CCW, right sets CW.
+    Space stops the axis at once: the target velocity is set to 0 without a ramp, and the drive
+    stays enabled (Enable Operation) so that the zero reaches the slave and Up can start it again.
+    The axis target follows the resulting goal at `accel` units/s^2, so a direction change ramps
+    through zero. Needs a terminal on `fd`.
+    """
+
+    def __init__(self, axis, velocity, max_velocity, accel, step=KEY_VELOCITY_STEP,
+                 fd=None):
+        self.axis = axis
+        self.max_velocity = max_velocity
+        self.accel = accel
+        self.step = step
+        self.fd = sys.stdin.fileno() if fd is None else fd
+        self.magnitude = abs(velocity)
+        self.direction = DIRECTION_CCW if velocity < 0 else DIRECTION_CW
+        self.current = float(axis.target_velocity)
+        self._buffer = b""
+        self._saved = None
+
+    def __enter__(self):
+        import termios
+        import tty
+        self._saved = termios.tcgetattr(self.fd)
+        tty.setcbreak(self.fd)  # keeps Ctrl+C working
+        return self
+
+    def __exit__(self, *exc):
+        import termios
+        if self._saved is not None:
+            termios.tcsetattr(self.fd, termios.TCSADRAIN, self._saved)
+        return False
+
+    def goal(self):
+        return self.direction * self.magnitude
+
+    def describe(self):
+        return (f"{self.axis.name}: set speed {self.magnitude} "
+                f"{'CCW' if self.direction == DIRECTION_CCW else 'CW'} "
+                f"(goal {self.goal()})")
+
+    def poll(self):
+        """Read pending key presses without blocking. Return the messages to print."""
+        while select.select([self.fd], [], [], 0)[0]:
+            data = os.read(self.fd, 64)
+            if not data:
+                break
+            self._buffer += data
+        messages = []
+        while self._buffer:
+            for sequence, name in KEY_SEQUENCES.items():
+                if self._buffer.startswith(sequence):
+                    self._buffer = self._buffer[len(sequence):]
+                    self._apply(name)
+                    messages.append(self.describe())
+                    break
+            else:
+                if any(sequence.startswith(self._buffer) for sequence in KEY_SEQUENCES):
+                    break  # incomplete escape sequence, wait for the rest
+                self._buffer = self._buffer[1:]
+        return messages
+
+    def _apply(self, name):
+        if name == "up":
+            self.magnitude = min(self.magnitude + self.step, self.max_velocity)
+        elif name == "down":
+            self.magnitude = max(self.magnitude - self.step, 0)
+        elif name == "left":
+            self.direction = DIRECTION_CCW
+        elif name == "right":
+            self.direction = DIRECTION_CW
+        elif name == "stop":
+            self.magnitude = 0
+            self.current = 0.0
+            self.axis.target_velocity = 0
+
+    def advance(self, dt):
+        """Move the axis target toward the goal at `accel` units/s^2."""
+        goal = self.goal()
+        delta = self.accel * dt
+        if goal > self.current:
+            self.current = min(goal, self.current + delta)
+        else:
+            self.current = max(goal, self.current - delta)
+        self.axis.target_velocity = round(self.current)
 
 
 class Axis:
@@ -303,12 +409,22 @@ class Drive:
             if elapsed >= total:
                 return
 
-    def hold_velocity(self, seconds, axes, limits, log_interval=0.25):
-        """Hold the target velocities for `seconds`, or until Ctrl+C if `seconds` is None."""
+    def hold_velocity(self, seconds, axes, limits, log_interval=0.25, keyboard=None):
+        """Hold the target velocities for `seconds`, or until Ctrl+C if `seconds` is None.
+
+        `keyboard` is an optional KeyboardVelocity that changes one axis while holding.
+        """
         end = None if seconds is None else time.monotonic() + seconds
         next_log = time.monotonic()
+        last = time.monotonic()
         try:
             while end is None or time.monotonic() < end:
+                if keyboard is not None:
+                    for message in keyboard.poll():
+                        print(message)
+                    now = time.monotonic()
+                    keyboard.advance(min(now - last, 0.05))
+                    last = now
                 self.cycle()
                 for axis in axes:
                     axis.check_safe(limits[axis])
@@ -470,6 +586,7 @@ def main():
         # Axis 1 is also the default when no velocity is given (status read, enable and hold).
         moves = {}
         axes = []
+        axis1 = None
         if args.velocity is not None or args.velocity2 is None:
             axis1 = drive.add_axis("Axis 1", rx_entries, tx_entries)
             axes.append(axis1)
@@ -508,7 +625,23 @@ def main():
                     print(f"{axis.name}: ramping to velocity {velocity} at {args.accel}/s^2, "
                           f"hold {hold_text}, limit {limit}")
                 drive.ramp_velocity({a: v for a, (v, _) in moves.items()}, args.accel, limits)
-                drive.hold_velocity(hold_seconds, list(moves), limits)
+                keyboard = None
+                if args.continuous:
+                    if axis1 is None or axis1 not in moves:
+                        print("Arrow key control is for axis 1 only; axis 1 is not moving, "
+                              "keys disabled")
+                    elif not sys.stdin.isatty():
+                        print("Arrow key control needs a terminal on stdin, keys disabled")
+                    else:
+                        keyboard = KeyboardVelocity(axis1, args.velocity, args.max_velocity,
+                                                    args.accel)
+                if keyboard is None:
+                    drive.hold_velocity(hold_seconds, list(moves), limits)
+                else:
+                    print(f"Keys (axis 1 only): Up/Down speed +/-{KEY_VELOCITY_STEP}, "
+                          "Left = CCW, Right = CW, Space = stop axis 1, Ctrl+C to exit")
+                    with keyboard:
+                        drive.hold_velocity(hold_seconds, list(moves), limits, keyboard=keyboard)
                 print("Ramping down to 0")
                 drive.ramp_velocity({a: 0 for a in moves}, args.accel, limits)
                 drive.run_cycles(0.5, log_interval=0.25)

@@ -61,7 +61,7 @@ python3 read-motor-drive-status.py [interface] [--enable] [--hold SECONDS] [--mo
 | `--max-velocity LIMIT` | Positive limit. `abs(--velocity)` must not exceed it. The move aborts if the measured velocity exceeds 1.5 x this value. |
 | `--accel A` | Velocity ramp in units/s², used for both ramp up and ramp down. |
 | `--motion-time SECONDS` | Time to hold the target velocity between the ramps. Required with `--velocity` / `--velocity2` unless `--continuous` is given. |
-| `--continuous` | Hold the target velocity until Ctrl+C instead of for `--motion-time`. Mutually exclusive with `--motion-time`; requires `--velocity` or `--velocity2`. On Ctrl+C the script ramps down at `--accel`, then runs the normal shutdown. The safety checks stay active while holding. |
+| `--continuous` | Hold the target velocity until Ctrl+C instead of for `--motion-time`. Mutually exclusive with `--motion-time`; requires `--velocity` or `--velocity2`. On Ctrl+C the script ramps down at `--accel`, then runs the normal shutdown. The safety checks stay active while holding. The arrow keys and space bar change axis 1 while holding (see [Keyboard control](#keyboard-control-in---continuous-mode)). |
 | `--velocity2 V2` | Target velocity written to `0x68FF` (second axis). Signed. Requires `--enable`, `--mode`, `--max-velocity2`, `--accel`, and `--motion-time`. Can be used with or without `--velocity`. Without `--velocity`, the first axis is not touched: its controlword stays `0x0000`. |
 | `--max-velocity2 LIMIT2` | Same meaning as `--max-velocity`, for the second axis. |
 
@@ -165,6 +165,33 @@ python3 read-motor-drive-status.py eth0 --enable --mode 9 --velocity 10 \
 
 Small values for a first run on a new setup. The numbers are placeholders and are not derived from
 any drive limit.
+
+### Keyboard control in --continuous mode
+
+While `--continuous` holds the velocity, the arrow keys and the space bar change **axis 1 only**.
+Axis 2 is not affected. This needs a terminal on stdin (an SSH session works) and `--velocity` given
+for axis 1. If axis 1 is not moving or stdin is not a terminal, the script prints a message and the
+keys are disabled.
+
+| Key | Action |
+|---|---|
+| Up | Increase the speed by 5 (up to `--max-velocity`). |
+| Down | Decrease the speed by 5 (not below 0). |
+| Left | Direction CCW (negative velocity). |
+| Right | Direction CW (positive velocity). |
+| Space | Stop axis 1: the target velocity is set to 0 immediately, without a ramp. The drive stays enabled, so Up starts it again in the current direction. |
+
+The target moves to the new goal at `--accel`, so a direction change ramps through 0 and never steps
+from +v to -v. Space is the exception: it zeroes the target at once. It does not disable the drive,
+because the slave only passes the target on while the controlword is Enable Operation; Ctrl+C still
+ramps down and disables. How quickly the motor itself stops after the zero is set by the motor
+firmware's own speed ramp, which I have not measured. The starting direction comes from the sign of
+`--velocity` (negative = CCW). The step of 5 is `KEY_VELOCITY_STEP` in the script.
+
+Which sign of `0x60FF` is clockwise on the tested slave has not been established (see
+[Open points](#open-points)). The script assumes positive = CW (`DIRECTION_CW` / `DIRECTION_CCW`
+in the script). If the shaft turns the other way, swap those two values. This has been tested with
+a simulated terminal and drive only, not on the hardware.
 
 ## What the script does
 
